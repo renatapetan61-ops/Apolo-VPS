@@ -89,3 +89,33 @@ pytest
 - Passwords must be generated server-side and shown once; do not log or store plaintext.
 - Restrict lifecycle actions by tenant ownership and audit every operation before exposing the API to users.
 - Do not claim a VM is running unless libvirt confirms its state.
+
+
+## GitHub Codespaces QEMU development host
+
+The repository includes a Codespaces devcontainer that installs real QEMU system
+emulators for x86_64 and AArch64, QEMU utilities, libvirt client/daemon packages,
+OVMF firmware and cloud-image tools. On creation it runs
+`bash scripts/codespaces-hypervisor-preflight.sh`, which reports whether the
+Codespaces instance actually exposes KVM, libvirt system access and TUN/TAP.
+
+This is a **development and compatibility-test environment**, not a promise of
+production VPS hosting. Codespaces runs inside a GitHub-managed VM and its
+container has limited access to the outer VM host. The devcontainer does not
+request privileged mode and does not attempt to change host networking. If
+`/dev/kvm` is unavailable, QEMU can use TCG software emulation for controlled
+tests; performance may be slow, especially for cross-architecture guests.
+Without TUN/TAP and control of public routing, guests cannot be offered as
+internet-reachable VPSs with dedicated public IP addresses.
+
+GitHub documents a maximum Codespaces lifetime of 12 hours, even when active.
+Therefore Codespaces cannot be treated as an always-on, persistent production
+hypervisor. Keep the control-plane source and persistent state in durable
+services; use Codespaces for development, builds and short-lived QEMU tests.
+Before any production claim, run the preflight in the actual Codespace and
+validate guest boot, storage persistence, network reachability and lifecycle
+operations.
+
+To start: open this repository on GitHub, choose **Code → Codespaces → Create
+codespace on main**, wait for the devcontainer build, then inspect the
+`APOLO VPS / GitHub Codespaces QEMU preflight` output in the creation terminal.
