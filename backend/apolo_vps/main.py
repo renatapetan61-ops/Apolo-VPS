@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from .ipam import IPAMError, IPAllocator
 from .store import InstanceStore
+from .environment_manager import EnvironmentStore
 
-app = FastAPI(title="APOLO VPS API", version="0.3.0",
+app = FastAPI(title="APOLO VPS API", version="0.4.0",
               description="Greek-gold cloud infrastructure control plane")
 origins = [x.strip() for x in os.getenv("APOLO_CORS_ORIGINS", "http://localhost:5173").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
@@ -47,6 +48,29 @@ class CreateInstance(BaseModel):
         if not re.fullmatch(r"[a-z_][a-z0-9_-]{2,31}", value):
             raise ValueError("Username must contain 3–32 safe characters.")
         return value
+
+
+class EnvironmentRequest(BaseModel):
+    vps_id: str = Field(min_length=4, max_length=80)
+    provider: str = Field(default="github-codespaces")
+    vcpus: int = Field(default=2, ge=1, le=32)
+    memory_mib: int = Field(default=2048, ge=512, le=131072)
+    disk_gib: int = Field(default=30, ge=10, le=2048)
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value):
+        if value not in {"github-codespaces", "libvirt-agent"}:
+            raise ValueError("Unsupported runtime provider.")
+        return value
+
+
+class EnvironmentTransition(BaseModel):
+    state: str
+    disk_uri: str | None = None
+    runtime_id: str | None = None
+    last_error: str | None = None
+
 
 def _agent_config():
     url = os.getenv("APOLO_PROVISIONER_URL", "").rstrip("/")
@@ -83,6 +107,9 @@ def _require_control_token(authorization: str | None):
 
 def _store():
     return InstanceStore()
+
+def _environments():
+    return EnvironmentStore()
 
 def _ipam():
     return IPAllocator()
@@ -124,6 +151,39 @@ def instances():
         item["state"] = state_names.get(raw_state, "Unknown") if raw_state is not None else "Missing on hypervisor"
         result.append(item)
     return {"instances":result,"source":"sqlite-plus-live-libvirt"}
+
+@app.post("/api/v1/environments/requests", status_code=status.HTTP_202_ACCEPTED)
+def request_environment(payload: EnvironmentRequest, authorization: str | None = Header(default=None)):
+    _require_control_token(authorization)
+    record = _environments().request(
+        vps_id=payload.vps_id, provider=payload.provider, vcpus=payload.vcpus,
+        memory_mib=payload.memory_mib, disk_gib=payload.disk_gib,
+    )
+    return {
+        "environment": record,
+        "accepted": True,
+        "provisioned": False,
+        "message": "Request persisted. A provider worker and available authorized capacity are required before a runtime can be started.",
+    }
+
+@app.get("/api/v1/environments")
+def list_environments(vps_id: str | None = None):
+    return {"environments": _environments().list(vps_id), "source": "durable-sqlite-metadata"}
+
+@app.post("/api/v1/environments/{environment_id}/transition")
+def transition_environment(environment_id: str, payload: EnvironmentTransition,
+                           authorization: str | None = Header(default=None)):
+    _require_control_token(authorization)
+    try:
+        result = _environments().transition(
+            environment_id, payload.state, disk_uri=payload.disk_uri,
+            runtime_id=payload.runtime_id, last_error=payload.last_error,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, "Environment request not found.")
+    return {"environment": result}
 
 @app.post("/api/v1/instances", status_code=status.HTTP_201_CREATED)
 def create_instance(payload: CreateInstance, authorization: str | None = Header(default=None)):
