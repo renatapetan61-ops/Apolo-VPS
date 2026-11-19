@@ -117,7 +117,8 @@ def list_hypervisors():
 
 @app.get("/api/v1/images")
 def images():
-    return {"images": list_images(), "source": "local-image-configuration"}
+    payload = _agent_get("/agent/v1/images")
+    return {"images": payload.get("images", []), "source": "live-hypervisor-catalog"}
 
 
 @app.get("/api/v1/instances")
