@@ -31,7 +31,7 @@ cd backend
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-agent.txt
-# python3-libvirt should be installed from the OS package manager.
+# The venv must be created with --system-site-packages so it can import OS python3-libvirt.
 export APOLO_AGENT_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
 uvicorn apolo_vps.agent:app --host 127.0.0.1 --port 8090
 ```
