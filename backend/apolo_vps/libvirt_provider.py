@@ -90,7 +90,7 @@ class LibvirtProvider:
             conn.close()
 
     def define_domain(self, *, name: str, memory_mib: int, vcpus: int, disk_path: str,
-                      image_path: str, bridge: str, cloud_init_iso: str) -> dict:
+                      image_path: str, bridge: str, cloud_init_iso: str, disk_gib: int = 20) -> dict:
         """Create a domain from prevalidated local paths and an operator bridge."""
         for value in (name, bridge):
             if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{1,62}", value):
@@ -99,7 +99,7 @@ class LibvirtProvider:
             if not Path(candidate).is_file():
                 raise ProviderUnavailable(f"Required image/disk file does not exist: {candidate}")
         qemu_img = os.getenv("APOLO_QEMU_IMG", "qemu-img")
-        subprocess.run([qemu_img, "create", "-f", "qcow2", "-F", "qcow2", "-b", image_path, disk_path],
+        subprocess.run([qemu_img, "create", "-f", "qcow2", "-F", "qcow2", "-b", image_path, disk_path, f"{disk_gib}G"],
                        check=True, capture_output=True, text=True, timeout=120)
         root = ET.Element("domain", type="kvm")
         ET.SubElement(root, "name").text = name
