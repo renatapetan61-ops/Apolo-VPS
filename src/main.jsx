@@ -4,10 +4,12 @@ import { Activity, ArrowDownToLine, ChevronDown, CircleHelp, Cloud, Cpu, Databas
 import './styles.css';
 
 const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const nav = [{ label: 'Overview', icon: Layers3 }, { label: 'Virtual machines', icon: Server }, { label: 'Images', icon: HardDrive }, { label: 'Networks', icon: Network }];
+const nav = [{ label: 'Overview', icon: Layers3 }, { label: 'Virtual machines', icon: Server }, { label: 'Environments', icon: Activity }, { label: 'Images', icon: HardDrive }, { label: 'Networks', icon: Network }];
 function App() {
   const [section, setSection] = useState('Overview');
   const [instances, setInstances] = useState([]);
+  const [environments, setEnvironments] = useState([]);
+  const [envSizing, setEnvSizing] = useState({ vcpus: 2, memory_mib: 2048, disk_gib: 30 });
   const [health, setHealth] = useState({ state: 'checking', provider_ready: false });
   const [showCreate, setShowCreate] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
@@ -19,13 +21,29 @@ function App() {
 
   async function refresh() {
     try {
-      const [h, v] = await Promise.all([fetch(API + '/api/v1/health'), fetch(API + '/api/v1/instances')]);
+      const [h, v, env] = await Promise.all([fetch(API + '/api/v1/health'), fetch(API + '/api/v1/instances'), fetch(API + '/api/v1/environments')]);
       if (h.ok) setHealth(await h.json());
       if (v.ok) setInstances((await v.json()).instances || []);
       else setInstances([]);
+      if (env.ok) setEnvironments((await env.json()).environments || []);
     } catch { setHealth({ state: 'offline', provider_ready: false }); }
   }
   useEffect(() => { refresh(); }, []);
+  async function requestEnvironment(e) {
+    e.preventDefault(); setLoading(true); setNotice('');
+    try {
+      const res = await fetch(API + '/api/v1/environments/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + controlToken },
+        body: JSON.stringify({ vps_id: 'vm-' + crypto.randomUUID(), provider: 'libvirt-agent', ...envSizing })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Environment request failed.');
+      setNotice(data.message || 'Request queued; it is not a running VPS yet.');
+      refresh();
+    } catch (err) { setNotice(err.message); }
+    finally { setLoading(false); }
+  }
   async function createInstance(e) {
     e.preventDefault(); setLoading(true); setNotice('');
     try {
@@ -57,6 +75,18 @@ function App() {
       <div className="content">
         <div className="welcome-row"><div><div className="eyebrow"><Sparkles size={13}/> THE CLOUD, REFINED</div><h1>{section === 'Overview' ? 'Your infrastructure,' : section}<em> elevated.</em></h1><p className="subtitle">A clear view of your compute, network and virtual machines.</p></div><button className="gold-button" onClick={() => setShowCreate(true)}><Plus size={17}/> Create VPS</button></div>
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}><X size={16}/></button></div>}
+        {section === 'Environments' && <section className="instances-panel">
+          <div className="panel-head"><div><h3>Environment orchestration</h3><p>Queue, capacity checks and verified runtime recovery</p></div><span className="status-pill">{health.provider_ready ? 'Host connected' : 'Awaiting host'}</span></div>
+          <form className="modal" onSubmit={requestEnvironment}>
+            <label>APOLO control token<input required type="password" autoComplete="off" value={controlToken} onChange={e => setControlToken(e.target.value)} placeholder="Control token" /></label>
+            <label>vCPU<input type="number" min="1" max="32" value={envSizing.vcpus} onChange={e => setEnvSizing({...envSizing,vcpus:Number(e.target.value)})}/></label>
+            <label>RAM (MiB)<input type="number" min="512" step="512" value={envSizing.memory_mib} onChange={e => setEnvSizing({...envSizing,memory_mib:Number(e.target.value)})}/></label>
+            <label>Disk (GiB)<input type="number" min="10" value={envSizing.disk_gib} onChange={e => setEnvSizing({...envSizing,disk_gib:Number(e.target.value)})}/></label>
+            <div className="secure-note"><KeyRound size={16}/><span>Provider: authorized libvirt/QEMU host. Persistent storage and runtime must be independently confirmed.</span></div>
+            <button className="gold-button submit-button" disabled={loading}>{loading ? 'Submitting…' : 'Queue environment request'}</button>
+          </form>
+          <div className="table-wrap"><table><thead><tr><th>REQUEST</th><th>PROVIDER</th><th>RESOURCES</th><th>STATE</th><th>DETAIL</th></tr></thead><tbody>{environments.map(env => <tr key={env.id}><td><b>{env.vps_id}</b><small>{env.id}</small></td><td>{env.provider}</td><td>{env.vcpus} vCPU · {env.memory_mib} MiB · {env.disk_gib} GiB</td><td><span className="status-pill">{env.state}</span></td><td>{env.last_error || (env.runtime_id ? 'Runtime verified' : 'Waiting for worker')}</td></tr>)}</tbody></table>{environments.length === 0 && <p className="subtitle">No environment requests yet.</p>}</div>
+        </section>}
         <section className="hero"><div className="hero-pattern">Ω</div><div className="hero-copy"><div className="hero-kicker"><span/> APOLO CLOUD CONTROL PLANE</div><h2>Built on precision.<br/><i>Designed for possibility.</i></h2><p>Manage your virtual infrastructure with clarity, control and confidence.</p><button className="hero-link" onClick={() => setNotice('Connect a KVM/libvirt host and configure storage and public networking to enable real VPS provisioning.')}>Explore infrastructure requirements <span>↗</span></button></div><div className="hero-seal"><div className="seal-ring"><span>Α</span><small>APOLO<br/>VPS</small></div></div></section>
         <div className="section-heading"><div><h3>Infrastructure overview</h3><p>Your resources at a glance</p></div><button className="subtle-button" onClick={refresh}><RefreshCw size={14}/> Refresh</button></div>
         <div className="stats-grid"><Stat icon={Server} label="Virtual machines" value={String(count).padStart(2,'0')} detail="Confirmed instances" /><Stat icon={Cpu} label="vCPU allocated" value="—" detail="Awaiting hypervisor" /><Stat icon={Database} label="Memory allocated" value="—" detail="Awaiting hypervisor" /><Stat icon={Activity} label="Provider status" value={health.provider_ready ? 'Ready' : 'Setup'} detail={health.provider_ready ? 'Provisioner available' : 'Hypervisor not connected'} status={!health.provider_ready}/></div>
