@@ -73,7 +73,7 @@ class EnvironmentStore:
             return dict(row) if row else None
 
     def claim_next(self, lease_seconds: int = 180) -> dict | None:
-        """Atomically claim one queued/recovering job; expired worker leases are reclaimable."""
+        """Atomically claim queued work or reclaim a job whose worker lease expired."""
         now = datetime.now(timezone.utc)
         now_s = now.isoformat()
         lease_s = datetime.fromtimestamp(now.timestamp() + lease_seconds, timezone.utc).isoformat()
@@ -81,8 +81,10 @@ class EnvironmentStore:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("""
                 SELECT * FROM environments
-                WHERE state IN ('waiting_capacity','recovering')
-                  AND (lease_until IS NULL OR lease_until < ?)
+                WHERE (
+                    state IN ('waiting_capacity','recovering')
+                    OR (state='provisioning' AND lease_until < ?)
+                ) AND (lease_until IS NULL OR lease_until < ?)
                 ORDER BY created_at LIMIT 1
             """, (now_s, now_s)).fetchone()
             if row is None:
@@ -90,8 +92,10 @@ class EnvironmentStore:
             changed = db.execute("""
                 UPDATE environments SET state='provisioning', lease_until=?, updated_at=?,
                     attempts=attempts+1, last_error=NULL
-                WHERE id=? AND state IN ('waiting_capacity','recovering')
-                  AND (lease_until IS NULL OR lease_until < ?)
+                WHERE id=? AND (
+                    state IN ('waiting_capacity','recovering')
+                    OR (state='provisioning' AND lease_until < ?)
+                ) AND (lease_until IS NULL OR lease_until < ?)
             """, (lease_s, now_s, row["id"], now_s, now_s)).rowcount
             if changed != 1:
                 return None
