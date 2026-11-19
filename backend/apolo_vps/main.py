@@ -167,8 +167,11 @@ def request_environment(payload: EnvironmentRequest, authorization: str | None =
     }
 
 @app.get("/api/v1/environments")
-def list_environments(vps_id: str | None = None):
-    return {"environments": _environments().list(vps_id), "source": "durable-sqlite-metadata"}
+def list_environments(vps_id: str | None = None, authorization: str | None = Header(default=None)):
+    _require_control_token(authorization)
+    records = _environments().list(vps_id)
+    counts = {state: sum(1 for item in records if item["state"] == state) for state in EnvironmentStore.STATES}
+    return {"environments": records, "counts": counts, "source": "durable-sqlite-metadata"}
 
 @app.post("/api/v1/environments/{environment_id}/transition")
 def transition_environment(environment_id: str, payload: EnvironmentTransition,
