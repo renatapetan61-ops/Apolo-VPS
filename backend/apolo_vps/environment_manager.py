@@ -84,7 +84,7 @@ class EnvironmentStore:
                 WHERE state IN ('waiting_capacity','recovering')
                   AND (lease_until IS NULL OR lease_until < ?)
                 ORDER BY created_at LIMIT 1
-            """, (now_s,)).fetchone()
+            """, (now_s, now_s)).fetchone()
             if row is None:
                 return None
             changed = db.execute("""
@@ -92,7 +92,7 @@ class EnvironmentStore:
                     attempts=attempts+1, last_error=NULL
                 WHERE id=? AND state IN ('waiting_capacity','recovering')
                   AND (lease_until IS NULL OR lease_until < ?)
-            """, (lease_s, now_s, row["id"], now_s)).rowcount
+            """, (lease_s, now_s, row["id"], now_s, now_s)).rowcount
             if changed != 1:
                 return None
             claimed = db.execute("SELECT * FROM environments WHERE id=?", (row["id"],)).fetchone()
