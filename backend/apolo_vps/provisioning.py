@@ -116,7 +116,10 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
             cloud_init_iso=seed_path, disk_gib=disk_gib,
         )
         # QEMU has opened the seed ISO; unlink it to avoid retaining password hashes.
-        Path(seed_path).unlink(missing_ok=True)
+        try:
+            Path(seed_path).unlink(missing_ok=True)
+        except OSError:
+            pass
         return {
             **result, "computer_name": name, "username": username,
             "password": password, "ipv4": ipv4, "ipv6": ipv6,
