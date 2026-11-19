@@ -64,7 +64,7 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
         "ssh_pwauth": True,
         "chpasswd": {"expire": True},
         "package_update": True,
-        "packages": ["qemu-guest-agent"],
+        "packages": ["qemu-guest-agent", "ufw"],
         "runcmd": [
             ["systemctl", "enable", "--now", "qemu-guest-agent"],
             ["ufw", "allow", "OpenSSH"],
