@@ -35,7 +35,7 @@ def health(x_apolo_agent_token: str | None = Header(default=None)):
     _authorize(x_apolo_agent_token)
     try:
         info = provider.hypervisor_info()
-        return {"state": "ok", "provider": "libvirt", "hypervisor": info}
+        return {"state": "ok", "provider": "libvirt", "location": os.getenv("APOLO_HYPERVISOR_LOCATION", "unassigned"), "hypervisor": info}
     except ProviderUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
 
