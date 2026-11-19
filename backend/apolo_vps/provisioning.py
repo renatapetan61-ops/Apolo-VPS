@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import ipaddress
 import secrets
 import shutil
 import subprocess
@@ -35,12 +36,22 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
         raise ProvisioningError("The selected image is not installed and verified.")
     if image["family"] != "linux" or image["provisioner"] != "cloud-init":
         raise ProvisioningError("This guest image requires a different unattended provisioner.")
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{2,31}", username):
+        raise ProvisioningError("Invalid guest username.")
+    try:
+        if not ipaddress.ip_address(ipv4).is_global or not ipaddress.ip_address(ipv6).is_global:
+            raise ProvisioningError("Only provider-routed global IPv4 and IPv6 addresses can be assigned.")
+    except ValueError as exc:
+        raise ProvisioningError("Invalid IPv4 or IPv6 address.") from exc
     name = computer_name or generated_hostname()
     if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", name):
         raise ProvisioningError("Invalid computer name.")
     bridge = os.getenv("APOLO_LIBVIRT_BRIDGE")
     if not bridge:
         raise ProvisioningError("APOLO_LIBVIRT_BRIDGE is not configured.")
+    provider = LibvirtProvider()
+    if any(domain["name"] == name for domain in provider.list_domains()):
+        raise ProvisioningError("A VM with this computer name already exists on the hypervisor.")
     storage = Path(os.getenv("APOLO_VM_STORAGE", "/var/lib/libvirt/images/apolo-vps"))
     storage.mkdir(parents=True, exist_ok=True)
     disk_path = str(storage / f"{instance_id}.qcow2")
@@ -109,7 +120,6 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
                         seed_path, str(tmp_path / "user-data"), str(tmp_path / "meta-data")],
                        check=True, capture_output=True, text=True, timeout=60)
     try:
-        provider = LibvirtProvider()
         result = provider.define_domain(
             name=name, memory_mib=memory_mib, vcpus=vcpus,
             disk_path=disk_path, image_path=image["path"], bridge=bridge,
