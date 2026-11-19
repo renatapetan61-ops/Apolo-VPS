@@ -70,3 +70,16 @@ def test_store_claims_job_only_once(tmp_path):
     second = store.claim_next()
     assert first is not None
     assert second is None
+
+
+def test_worker_reclaims_expired_provisioning_lease(tmp_path):
+    store = EnvironmentStore(str(tmp_path / "state.sqlite3"))
+    job = create_job(store)
+    first = store.claim_next(lease_seconds=1)
+    assert first is not None
+    with store.connect() as db:
+        db.execute("UPDATE environments SET lease_until='2000-01-01T00:00:00+00:00' WHERE id=?", (job["id"],))
+    reclaimed = store.claim_next()
+    assert reclaimed is not None
+    assert reclaimed["id"] == job["id"]
+    assert reclaimed["attempts"] == 2
