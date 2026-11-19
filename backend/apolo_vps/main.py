@@ -135,13 +135,15 @@ def create_instance(payload: CreateInstance, authorization: str | None = Header(
     if payload.location != "auto" and payload.location != configured_location:
         raise HTTPException(409, "The connected hypervisor is not registered in the selected location.")
     instance_id = "vm-" + uuid.uuid4().hex
+    requested_name = payload.computer_name or ("apolo-" + uuid.uuid4().hex[:8])
     try:
         ipv4, ipv6 = _ipam().allocate(instance_id)
     except IPAMError as exc:
         raise HTTPException(503, str(exc)) from exc
+    result = None
     try:
         result = _agent_request("POST", "/agent/v1/provision", {
-            "instance_id":instance_id, "computer_name":payload.computer_name,
+            "instance_id":instance_id, "computer_name":requested_name,
             "username":payload.username, "image_id":payload.os, "ipv4":ipv4, "ipv6":ipv6,
             "memory_mib":payload.memory_mib, "vcpus":payload.vcpus, "disk_gib":payload.disk_gib,
         }, timeout=240)
@@ -151,6 +153,11 @@ def create_instance(payload: CreateInstance, authorization: str | None = Header(
         return {"instance":record,"credentials":{"username":payload.username,"password":result["password"]},
                 "message":"VM created and started by libvirt. Save the password now; it will not be shown again."}
     except Exception:
+        if result and result.get("computer_name"):
+            try:
+                _agent_request("POST", f"/agent/v1/domains/{result['computer_name']}/delete", timeout=30)
+            except Exception:
+                pass
         try: _ipam().release(instance_id)
         except Exception: pass
         raise
