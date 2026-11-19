@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import uuid
+import hmac
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
@@ -72,6 +73,14 @@ def _agent_request(method, path, body=None, timeout=12):
     except httpx.HTTPError as exc:
         raise HTTPException(503, "Host agent is unreachable.") from exc
 
+def _require_control_token(authorization: str | None):
+    expected = os.getenv("APOLO_CONTROL_TOKEN", "")
+    if not expected:
+        raise HTTPException(503, "Set APOLO_CONTROL_TOKEN before enabling VPS management.")
+    supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    if not authorization or not authorization.startswith("Bearer ") or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(401, "A valid APOLO control token is required.")
+
 def _store():
     return InstanceStore()
 
@@ -114,7 +123,14 @@ def instances():
     return {"instances":result,"source":"sqlite-plus-live-libvirt"}
 
 @app.post("/api/v1/instances", status_code=status.HTTP_201_CREATED)
-def create_instance(payload: CreateInstance):
+def create_instance(payload: CreateInstance, authorization: str | None = Header(default=None)):
+    _require_control_token(authorization)
+    if payload.location not in {"auto", "sa-east", "us-east", "eu-west"}:
+        raise HTTPException(400, "Unsupported location.")
+    host = _agent_request("GET", "/agent/v1/health", timeout=5)
+    configured_location = host.get("location", "unassigned")
+    if payload.location != "auto" and payload.location != configured_location:
+        raise HTTPException(409, "The connected hypervisor is not registered in the selected location.")
     instance_id = "vm-" + uuid.uuid4().hex
     try:
         ipv4, ipv6 = _ipam().allocate(instance_id)
@@ -127,7 +143,7 @@ def create_instance(payload: CreateInstance):
             "memory_mib":payload.memory_mib, "vcpus":payload.vcpus, "disk_gib":payload.disk_gib,
         }, timeout=240)
         record={"id":instance_id,"name":result["computer_name"],"username":payload.username,
-                "os":payload.os,"ipv4":ipv4,"ipv6":ipv6,"state":"running"}
+                "os":payload.os,"ipv4":ipv4,"ipv6":ipv6,"location":configured_location,"state":"running"}
         _store().save(record)
         return {"instance":record,"credentials":{"username":payload.username,"password":result["password"]},
                 "message":"VM created and started by libvirt. Save the password now; it will not be shown again."}
@@ -137,7 +153,8 @@ def create_instance(payload: CreateInstance):
         raise
 
 @app.post("/api/v1/instances/{name}/{action}")
-def instance_lifecycle(name: str, action: str):
+def instance_lifecycle(name: str, action: str, authorization: str | None = Header(default=None)):
+    _require_control_token(authorization)
     if action not in {"start","shutdown","reboot","destroy","delete"}:
         raise HTTPException(400,"Unsupported lifecycle action.")
     result = _agent_request("POST",f"/agent/v1/domains/{name}/{action}")
