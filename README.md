@@ -1,75 +1,90 @@
 # APOLO VPS
 
-Greek-gold cloud infrastructure control plane. Independent implementation inspired by VPS hosting portals.
+Greek-gold cloud infrastructure control plane and KVM provisioning-engine foundation.
 
-## Current status
+## Implemented in this stage
 
-This repository starts the **control-plane foundation**:
-- Responsive Greek-gold dashboard (React + Vite).
-- VPS inventory and create-instance UI.
-- FastAPI control-plane API contract.
-- Explicit provider readiness checks; no fabricated IPs, credentials, or VM states.
+- React/Vite Greek-gold dashboard.
+- FastAPI control-plane API.
+- Optional secured host-agent service for a Linux KVM/libvirt host.
+- Live libvirt hypervisor information and domain inventory.
+- VM lifecycle operations: start, graceful shutdown, reboot, force stop and undefine.
+- OS image catalogue for Ubuntu 24.04, Debian 12, Rocky Linux 9 and Windows Server 2022. An image is enabled only when its configured file exists; Windows additionally requires a prepared unattended/RDP template.
+- Cryptographically secure password and hostname generation helpers.
+- SQLite-backed IPv4/IPv6 allocation helper that requires explicitly configured globally routable CIDRs.
+- Tests for credential generation and fail-closed image catalogue.
 
-**Important:** the application does not create a virtual machine merely by generating credentials. Real instances require a reachable Linux hypervisor with KVM/QEMU, libvirt, configured storage, bridged networking, routable IPv4/IPv6, and approved OS cloud images. Until a provider is configured, create requests return HTTP 503 rather than pretending a VPS exists.
+## Important deployment boundary
 
-## Stack
+GitHub is the source repository and CI platform; it is not a permanent KVM hypervisor. Real VM operations require a dedicated Linux server with hardware virtualization, KVM/QEMU, libvirt, storage, a bridge, public IPv4/IPv6 allocations authorized by the network provider, and verified guest images.
 
-- Frontend: React, Vite, TypeScript-ready JavaScript, Lucide icons.
-- API: Python 3.12+, FastAPI, Pydantic.
-- Planned hypervisor adapter: KVM/QEMU + libvirt.
-- Planned guest initialization: cloud-init.
-- Planned persistence: PostgreSQL.
-- Planned edge: Nginx + HTTPS.
+The public control-plane API must not access the libvirt socket directly. Deploy `apolo_vps.agent` on the hypervisor in a private management network. Expose it only through private HTTPS or a VPN. The API authenticates to it using a long random bearer-style token in the `X-Apolo-Agent-Token` header. Do not publish the agent port to the public internet.
 
-## Development
+## Host-agent installation (on the hypervisor)
 
-### Frontend
-```bash
-npm install
-npm run dev
-```
+Install OS packages using the hypervisor distribution's package manager. On Debian/Ubuntu, package names commonly include `qemu-kvm`, `libvirt-daemon-system`, `libvirt-clients`, `python3-libvirt`, and `qemu-utils`. Confirm package names for your release.
 
-Set `VITE_API_BASE_URL` to the API URL (defaults to `http://localhost:8000`).
+Then install the Python agent dependencies and run:
 
-### API
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-uvicorn apolo_vps.main:app --reload --host 0.0.0.0 --port 8000
+. .venv/bin/activate
+pip install -r requirements-agent.txt
+# python3-libvirt should be installed from the OS package manager.
+export APOLO_AGENT_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+uvicorn apolo_vps.agent:app --host 127.0.0.1 --port 8090
 ```
 
-## Real provisioning prerequisites
+The example binds to loopback. For a separate API host, put the agent behind a private VPN/reverse proxy with TLS; do not bind it to a public interface without network controls.
 
-1. Dedicated Linux host with hardware virtualization enabled.
-2. KVM/QEMU and libvirt daemon installed and healthy.
-3. Dedicated storage pool and verified OS image catalogue.
-4. Bridge/network configuration with provider-authorized public IPv4 and IPv6 allocation.
-5. Restricted provisioning service identity; never expose the libvirt socket to the public API.
-6. Secret management, audit logging, quotas, and abuse controls.
+## Control-plane configuration
 
-Do not expose libvirt, SSH, or hypervisor management ports to the public internet. Use a private control channel between API and host agent.
+Configure these environment variables in the API runtime's secret manager:
 
-## VPS record fields
+- `APOLO_PROVISIONER_URL`: private HTTPS URL for the host agent.
+- `APOLO_PROVISIONER_TOKEN`: same high-entropy token configured on the agent.
+- `APOLO_CORS_ORIGINS`: exact dashboard origins, comma-separated.
 
-- Computer name
-- Username
-- Password (write-only at creation; encrypted secret storage, reveal-once policy)
-- IPv4
-- IPv6
-- Location
-- Operating system
-- Lifecycle status and timestamps
+The health endpoint reports the hypervisor ready only after a successful live agent probe. A configured URL/token alone is not considered readiness.
 
-## Security principles
+## Image catalogue
 
-- Never commit credentials, API tokens, private keys, or real customer secrets.
-- Passwords must be generated server-side using a cryptographically secure RNG.
-- Store secrets encrypted with a managed key; redact them from logs.
-- Do not show a VM as running until the hypervisor confirms its state.
-- IP addresses must come from the configured network allocator, never random placeholders.
+Set each variable to an existing, verified image path on the hypervisor:
 
-## License
+- `APOLO_IMAGE_UBUNTU_2404`
+- `APOLO_IMAGE_DEBIAN_12`
+- `APOLO_IMAGE_ROCKY_9`
+- `APOLO_IMAGE_WINDOWS_2022`
 
-Project licensing is to be selected by the repository owner before public distribution.
+Windows Server also requires `APOLO_WINDOWS_TEMPLATE` to point to a reviewed unattended setup/RDP template and a properly licensed image. Do not distribute Microsoft installation media or keys without the required rights.
+
+## Addressing
+
+The IPAM helper requires:
+
+- `APOLO_IPV4_CIDR`: public IPv4 network delegated to this service.
+- `APOLO_IPV6_CIDR`: public IPv6 network delegated to this service.
+
+This helper reserves addresses in SQLite; it does not configure upstream routing, switch ports, bridge interfaces, firewall rules, reverse DNS, or provider anti-spoofing. Those must be configured and tested on the real network before allocating an address to a guest. Never use random addresses or private RFC1918 addresses as public VPS addresses.
+
+## Current safety gate
+
+The API can read live hypervisor inventory and perform lifecycle operations through the secured agent. Guest creation intentionally returns HTTP 501 until the complete cloud-init/Windows bootstrap pipeline, static guest network configuration, durable VM records, quotas, cleanup/rollback, and RDP policy are implemented and verified. The IPAM helper and credential helpers are foundations, not a claim that public addresses or VPS credentials have already been issued.
+
+## Tests
+
+```bash
+cd backend
+pip install -e '.[test]'
+pytest
+```
+
+## Security
+
+- Keep libvirt and agent management ports private.
+- Use TLS/VPN between control plane and agent.
+- Store secrets only in a secret manager; never commit tokens.
+- Passwords must be generated server-side and shown once; do not log or store plaintext.
+- Restrict lifecycle actions by tenant ownership and audit every operation before exposing the API to users.
+- Do not claim a VM is running unless libvirt confirms its state.
