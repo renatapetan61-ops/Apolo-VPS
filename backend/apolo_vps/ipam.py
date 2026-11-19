@@ -50,12 +50,17 @@ class IPAllocator:
         v4 = self._pool("APOLO_IPV4_CIDR", 4)
         v6 = self._pool("APOLO_IPV6_CIDR", 6)
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM allocations WHERE instance_id=?", (instance_id,)).fetchone():
                 raise IPAMError("Instance already has an address allocation.")
             used4 = {r[0] for r in db.execute("SELECT ipv4 FROM allocations WHERE ipv4 IS NOT NULL")}
             used6 = {r[0] for r in db.execute("SELECT ipv6 FROM allocations WHERE ipv6 IS NOT NULL")}
             reserved4 = set() if v4.prefixlen >= 31 else {str(v4.network_address), str(v4.broadcast_address)}
             reserved6 = set() if v6.prefixlen == 128 else {str(v6.network_address)}
+            if os.getenv("APOLO_IPV4_GATEWAY"):
+                reserved4.add(str(ipaddress.ip_address(os.environ["APOLO_IPV4_GATEWAY"])))
+            if os.getenv("APOLO_IPV6_GATEWAY"):
+                reserved6.add(str(ipaddress.ip_address(os.environ["APOLO_IPV6_GATEWAY"])))
             candidates4 = [v4.network_address] if v4.prefixlen == 32 else v4.hosts()
             candidates6 = [v6.network_address] if v6.prefixlen == 128 else v6.hosts()
             ip4 = next((str(ip) for ip in candidates4 if str(ip) not in used4 and str(ip) not in reserved4), None)
