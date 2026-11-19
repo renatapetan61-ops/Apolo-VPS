@@ -54,10 +54,12 @@ class IPAllocator:
                 raise IPAMError("Instance already has an address allocation.")
             used4 = {r[0] for r in db.execute("SELECT ipv4 FROM allocations WHERE ipv4 IS NOT NULL")}
             used6 = {r[0] for r in db.execute("SELECT ipv6 FROM allocations WHERE ipv6 IS NOT NULL")}
-            reserved4 = {str(v4.network_address), str(v4.broadcast_address)}
-            reserved6 = {str(v6.network_address)}
-            ip4 = next((str(ip) for ip in v4.hosts() if str(ip) not in used4 and str(ip) not in reserved4), None)
-            ip6 = next((str(ip) for ip in v6.hosts() if str(ip) not in used6 and str(ip) not in reserved6), None)
+            reserved4 = set() if v4.prefixlen >= 31 else {str(v4.network_address), str(v4.broadcast_address)}
+            reserved6 = set() if v6.prefixlen == 128 else {str(v6.network_address)}
+            candidates4 = [v4.network_address] if v4.prefixlen == 32 else v4.hosts()
+            candidates6 = [v6.network_address] if v6.prefixlen == 128 else v6.hosts()
+            ip4 = next((str(ip) for ip in candidates4 if str(ip) not in used4 and str(ip) not in reserved4), None)
+            ip6 = next((str(ip) for ip in candidates6 if str(ip) not in used6 and str(ip) not in reserved6), None)
             if not ip4 or not ip6:
                 raise IPAMError("The configured IPv4 or IPv6 pool is exhausted.")
             db.execute("INSERT INTO allocations(instance_id, ipv4, ipv6) VALUES (?, ?, ?)", (instance_id, ip4, ip6))
