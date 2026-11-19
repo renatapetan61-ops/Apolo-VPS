@@ -9,7 +9,7 @@ Greek-gold cloud infrastructure control plane and KVM provisioning-engine founda
 - Optional secured host-agent service for a Linux KVM/libvirt host.
 - Live libvirt hypervisor information and domain inventory.
 - VM lifecycle operations: start, graceful shutdown, reboot, force stop and undefine.
-- OS image catalogue for Ubuntu 24.04, Debian 12, Rocky Linux 9 and Windows Server 2022. An image is enabled only when its configured file exists; Windows additionally requires a prepared unattended/RDP template.
+- Architecture-aware OS image catalogue for Ubuntu 24.04, Debian 12 and Rocky Linux 9 (x86_64), ARM64 Linux catalog entries, Windows 11/10 x64 and ARM64, Windows 8/7 x64, and the legacy Windows Server 2022 entry. Only verified x86_64 Linux cloud images are enabled by the current provisioner; all ARM64 and Windows entries remain fail-closed until their dedicated boot, driver, unattended-install and access paths are implemented and tested.
 - Cryptographically secure password and hostname generation helpers.
 - SQLite-backed IPv4/IPv6 allocation helper that requires explicitly configured globally routable CIDRs.
 - Tests for credential generation and fail-closed image catalogue.
@@ -58,7 +58,7 @@ Set each variable to an existing, verified image path on the hypervisor:
 - `APOLO_IMAGE_ROCKY_9`
 - `APOLO_IMAGE_WINDOWS_2022`
 
-Windows Server also requires `APOLO_WINDOWS_TEMPLATE` to point to a reviewed unattended setup/RDP template and a properly licensed image. Do not distribute Microsoft installation media or keys without the required rights.
+Windows 11/10 x64, Windows 11/10 ARM64, Windows 8/7 and Windows Server are cataloged as planned targets, not currently provisionable guests. The current libvirt domain builder hardcodes x86_64/q35 and the host agent only implements Linux cloud-init. Do not mark Windows or ARM64 images enabled until separate architecture-aware domain builders, UEFI/firmware, VirtIO drivers, unattended installation, licensing/activation, networking, remote console/RDP and integration tests are complete. Windows 11 ARM64 installation media is available from Microsoft; use only media and licenses you are authorized to use. Older Windows versions are legacy and require isolated network policies.
 
 ## Addressing
 
@@ -71,7 +71,7 @@ This helper reserves addresses in SQLite; it does not configure upstream routing
 
 ## Current safety gate
 
-Linux VPS creation now runs through the host agent: the API reserves an IPv4/IPv6 pair, the agent generates a one-time password, renders cloud-init and static network configuration, creates a QCOW2 overlay, defines and starts the libvirt domain, then returns the password once. Metadata is persisted without plaintext passwords. This requires host, image, gateway, bridge, storage and public IP pool configuration. Windows Server still requires a prepared licensed template and separate unattended/RDP setup.
+Linux VPS creation now runs through the host agent: the API reserves an IPv4/IPv6 pair, the agent generates a one-time password, renders cloud-init and static network configuration, creates a QCOW2 overlay, defines and starts the libvirt domain, then returns the password once. Metadata is persisted without plaintext passwords. This requires host, image, gateway, bridge, storage and public IP pool configuration. Windows and ARM64 guests are intentionally disabled in the image catalog until their separate provisioners and real-hypervisor acceptance tests are complete.
 
 ## Tests
 
