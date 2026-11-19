@@ -13,7 +13,8 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('');
-  const [credentials, setCredentials] = useState(null);\n  const [controlToken, setControlToken] = useState('');
+  const [credentials, setCredentials] = useState(null);
+  const [controlToken, setControlToken] = useState('');
   const [form, setForm] = useState({ computer_name: '', username: '', os: 'ubuntu-24.04', location: 'auto', plan: 'standard-2' });
 
   async function refresh() {
