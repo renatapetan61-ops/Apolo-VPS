@@ -21,7 +21,7 @@ function App() {
 
   async function refresh() {
     try {
-      const [h, v, env] = await Promise.all([fetch(API + '/api/v1/health'), fetch(API + '/api/v1/instances'), fetch(API + '/api/v1/environments')]);
+      const [h, v, env] = await Promise.all([fetch(API + '/api/v1/health'), fetch(API + '/api/v1/instances'), fetch(API + '/api/v1/environments', { headers: { 'Authorization': 'Bearer ' + controlToken } })]);
       if (h.ok) setHealth(await h.json());
       if (v.ok) setInstances((await v.json()).instances || []);
       else setInstances([]);
