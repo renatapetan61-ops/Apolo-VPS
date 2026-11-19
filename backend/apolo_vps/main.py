@@ -117,8 +117,11 @@ def instances():
     live = _agent_request("GET","/agent/v1/domains").get("domains",[])
     live_by_name = {x["name"]:x for x in live}
     result=[]
+    state_names = {0:"No state",1:"Running",2:"Blocked",3:"Paused",4:"Shutting down",5:"Stopped",6:"Crashed",7:"Suspended"}
     for item in stored:
-        item["libvirt_state"] = live_by_name.get(item["name"],{}).get("state")
+        raw_state = live_by_name.get(item["name"],{}).get("state")
+        item["libvirt_state"] = raw_state
+        item["state"] = state_names.get(raw_state, "Unknown") if raw_state is not None else "Missing on hypervisor"
         result.append(item)
     return {"instances":result,"source":"sqlite-plus-live-libvirt"}
 
