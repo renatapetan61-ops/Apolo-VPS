@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -108,7 +109,12 @@ class LibvirtProvider:
             if not Path(candidate).is_file():
                 raise ProviderUnavailable(f"Required image/disk file does not exist: {candidate}")
         qemu_img = os.getenv("APOLO_QEMU_IMG", "qemu-img")
-        subprocess.run([qemu_img, "create", "-f", "qcow2", "-F", "qcow2", "-b", image_path, disk_path, f"{disk_gib}G"],
+        image_info = subprocess.run([qemu_img, "info", "--output=json", image_path],
+                                   check=True, capture_output=True, text=True, timeout=30)
+        image_format = json.loads(image_info.stdout).get("format")
+        if image_format not in {"qcow2", "raw"}:
+            raise ProviderUnavailable("Guest base image must be QCOW2 or raw.")
+        subprocess.run([qemu_img, "create", "-f", "qcow2", "-F", image_format, "-b", image_path, disk_path, f"{disk_gib}G"],
                        check=True, capture_output=True, text=True, timeout=120)
         root = ET.Element("domain", type="kvm")
         ET.SubElement(root, "name").text = name
