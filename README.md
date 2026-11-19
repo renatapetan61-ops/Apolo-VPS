@@ -119,3 +119,48 @@ operations.
 To start: open this repository on GitHub, choose **Code → Codespaces → Create
 codespace on main**, wait for the devcontainer build, then inspect the
 `APOLO VPS / GitHub Codespaces QEMU preflight` output in the creation terminal.
+
+
+## Runtime environment manager (initial implementation)
+
+The control plane now includes a durable SQLite registry for runtime-environment
+requests, with resource sizing (vCPU, RAM and disk), provider identity, lifecycle
+state, runtime ID, error details and an external persistent-disk URI. New requests
+are recorded as `waiting_capacity`; this is intentionally not reported as a
+running VPS. The API exposes:
+
+- `POST /api/v1/environments/requests` — authenticated request registration.
+- `GET /api/v1/environments` — list durable environment metadata (optionally
+  filtered with `?vps_id=...`).
+- `POST /api/v1/environments/{environment_id}/transition` — authenticated
+  lifecycle transition. An environment cannot be marked running/stopped/recovering
+  without a durable external `disk_uri`.
+
+This is the persistence and orchestration foundation, not a completed cloud
+provider integration. It does not yet create GitHub Codespaces, run a background
+scheduler, provision external object storage, migrate a live VM between runtimes,
+or measure provider billing. A provider worker must be implemented and connected
+before queued requests can become active. GitHub Codespaces is a short-lived
+development runtime only; its 12-hour cap and host/network restrictions make it
+unsuitable as a permanent VPS host. Never treat a newly created Codespace as
+automatic continuation of the previous VM: recovery requires an independently
+persisted disk image and a compatible authorized compute host.
+
+### Environment API example
+
+```http
+POST /api/v1/environments/requests
+Authorization: Bearer <APOLO_CONTROL_TOKEN>
+Content-Type: application/json
+
+{
+  "vps_id": "vm-example",
+  "provider": "github-codespaces",
+  "vcpus": 2,
+  "memory_mib": 2048,
+  "disk_gib": 30
+}
+```
+
+The response is `202 Accepted` with `provisioned: false` and state
+`waiting_capacity`. This is an honest queued request, not a created VM.
