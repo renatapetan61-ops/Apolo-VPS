@@ -50,12 +50,22 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
 
     password = generate_password()
     password_hash = _password_hash(password)
+    is_rocky = image_id == "rocky-9"
+    guest_group = "wheel" if is_rocky else "sudo"
+    packages = ["qemu-guest-agent", "firewalld"] if is_rocky else ["qemu-guest-agent", "ufw"]
+    firewall_commands = (
+        [["systemctl", "enable", "--now", "firewalld"],
+         ["firewall-cmd", "--permanent", "--add-service=ssh"],
+         ["firewall-cmd", "--reload"]]
+        if is_rocky else
+        [["ufw", "allow", "OpenSSH"], ["ufw", "--force", "enable"]]
+    )
     user_data = {
         "hostname": name,
         "manage_etc_hosts": True,
         "users": [{
             "name": username,
-            "groups": ["sudo"],
+            "groups": [guest_group],
             "shell": "/bin/bash",
             "sudo": ["ALL=(ALL) NOPASSWD:ALL"],
             "lock_passwd": False,
@@ -64,12 +74,8 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
         "ssh_pwauth": True,
         "chpasswd": {"expire": True},
         "package_update": True,
-        "packages": ["qemu-guest-agent", "ufw"],
-        "runcmd": [
-            ["systemctl", "enable", "--now", "qemu-guest-agent"],
-            ["ufw", "allow", "OpenSSH"],
-            ["ufw", "--force", "enable"],
-        ],
+        "packages": packages,
+        "runcmd": [["systemctl", "enable", "--now", "qemu-guest-agent"], *firewall_commands],
     }
     network_config = {
         "version": 2,
