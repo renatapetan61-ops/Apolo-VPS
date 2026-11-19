@@ -75,6 +75,8 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
         "version": 2,
         "ethernets": {
             "ens3": {
+                "match": {"driver": "virtio_net"},
+                "set-name": "ens3",
                 "dhcp4": False,
                 "dhcp6": False,
                 "addresses": [f"{ipv4}/{os.getenv('APOLO_GUEST_IPV4_PREFIX', '32')}",
