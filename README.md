@@ -70,7 +70,7 @@ This helper reserves addresses in SQLite; it does not configure upstream routing
 
 ## Current safety gate
 
-The API can read live hypervisor inventory and perform lifecycle operations through the secured agent. Guest creation intentionally returns HTTP 501 until the complete cloud-init/Windows bootstrap pipeline, static guest network configuration, durable VM records, quotas, cleanup/rollback, and RDP policy are implemented and verified. The IPAM helper and credential helpers are foundations, not a claim that public addresses or VPS credentials have already been issued.
+Linux VPS creation now runs through the host agent: the API reserves an IPv4/IPv6 pair, the agent generates a one-time password, renders cloud-init and static network configuration, creates a QCOW2 overlay, defines and starts the libvirt domain, then returns the password once. Metadata is persisted without plaintext passwords. This requires host, image, gateway, bridge, storage and public IP pool configuration. Windows Server still requires a prepared licensed template and separate unattended/RDP setup.
 
 ## Tests
 
