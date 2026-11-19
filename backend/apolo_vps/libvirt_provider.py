@@ -80,9 +80,18 @@ class LibvirtProvider:
             elif action == "destroy":
                 domain.destroy()
             elif action == "delete":
+                domain_xml = ET.fromstring(domain.XMLDesc(0))
                 if domain.isActive():
                     domain.destroy()
                 domain.undefineFlags(0)
+                storage_root = Path(os.getenv("APOLO_VM_STORAGE", "/var/lib/libvirt/images/apolo-vps")).resolve()
+                for source in domain_xml.findall(".//devices/disk/source"):
+                    disk_file = source.get("file")
+                    if not disk_file:
+                        continue
+                    candidate = Path(disk_file).resolve()
+                    if candidate.parent == storage_root and candidate.name.startswith("vm-"):
+                        candidate.unlink(missing_ok=True)
             else:
                 raise ValueError("Unsupported lifecycle action.")
             return {"name": name, "action": action, "state": int(domain.state()[0]) if action != "delete" else "undefined"}
