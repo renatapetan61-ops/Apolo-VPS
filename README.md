@@ -164,3 +164,57 @@ Content-Type: application/json
 
 The response is `202 Accepted` with `provisioned: false` and state
 `waiting_capacity`. This is an honest queued request, not a created VM.
+
+
+## Environment Provider Worker
+
+The API now has a separate long-running worker process. Run it on the same
+persistent API host (or another trusted worker host) with the same
+`APOLO_STATE_DB` database path:
+
+```bash
+cd backend
+python -m pip install -e .
+python -m apolo_vps.environment_worker
+```
+
+For a Linux deployment, `deploy/apolo-vps-worker.service` is a systemd unit
+template. Review its user, paths and environment-file location before enabling
+it. Do not run the worker in GitHub Actions or a Codespace as a permanent
+daemon; those are temporary execution environments.
+
+### Provider selection and execution contract
+
+- `APOLO_ENABLED_PROVIDERS` is an explicit server-side allowlist. The worker
+  currently registers only `libvirt-agent` when the HTTPS agent URL and token
+  are configured.
+- `github-codespaces` requests are rejected by the worker policy. Codespaces
+  remains a short-lived development workspace, not a VM host or recovery target.
+- The agent must implement authenticated endpoints:
+  - `GET /agent/v1/capacity`: `state: "ok"`, `authorized: true`, and
+    `available_vcpus`, `available_memory_mib`, `available_disk_gib`.
+  - `POST /agent/v1/disks/ensure`: provision or return an externally durable
+    disk; response must include `durable: true` and a stable `disk_uri`.
+  - `POST /agent/v1/environments/restore`: attach the disk and request runtime
+    creation; response must include `accepted: true` and `runtime_id`.
+  - `GET /agent/v1/runtimes/{runtime_id}`: independently report
+    `state: "running"` and the exact attached `disk_uri`.
+- The worker atomically leases one queued request, checks authorization and
+  capacity, ensures persistent storage, requests restore, and performs an
+  independent runtime check. It changes the state to `running` only after all
+  checks succeed. Insufficient capacity returns the request to the queue;
+  unsupported providers or contract violations fail closed.
+- SQLite stores metadata and disk references only. It is not a remote disk
+  service. The host agent must connect to real persistent storage (for example,
+  an object/block storage system with snapshots and access controls) and must
+  guarantee that `disk_uri` survives host replacement.
+
+### What is and is not live yet
+
+The worker orchestration and its test doubles are implemented. The real
+host-agent endpoints listed above, external storage backend, live billing
+meter, automatic monitoring/recovery scheduler, and a production host have
+not been connected or validated in this repository. Until those integrations
+exist and a real runtime is independently verified, jobs remain queued or fail
+closed; no VPS should be advertised as provisioned. GitHub Actions CI validates
+code, not host capacity, public networking, durable storage, or VM boot.
