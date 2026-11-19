@@ -18,7 +18,7 @@ Greek-gold cloud infrastructure control plane and KVM provisioning-engine founda
 
 GitHub is the source repository and CI platform; it is not a permanent KVM hypervisor. Real VM operations require a dedicated Linux server with hardware virtualization, KVM/QEMU, libvirt, storage, a bridge, public IPv4/IPv6 allocations authorized by the network provider, and verified guest images.
 
-The public control-plane API must not access the libvirt socket directly. Deploy `apolo_vps.agent` on the hypervisor in a private management network. Expose it only through private HTTPS or a VPN. The API authenticates to it using a long random bearer-style token in the `X-Apolo-Agent-Token` header. Do not publish the agent port to the public internet.
+The public control-plane API must not access the libvirt socket directly. Deploy `apolo_vps.agent` on the hypervisor in a private management network. Expose it only through private HTTPS or a VPN. The API authenticates to it using a long random token in the `X-Apolo-Agent-Token` header. VM management endpoints also require a separate `APOLO_CONTROL_TOKEN` Bearer credential. Do not publish the agent port to the public internet.
 
 ## Host-agent installation (on the hypervisor)
 
@@ -45,6 +45,7 @@ Configure these environment variables in the API runtime's secret manager:
 - `APOLO_PROVISIONER_URL`: private HTTPS URL for the host agent.
 - `APOLO_PROVISIONER_TOKEN`: same high-entropy token configured on the agent.
 - `APOLO_CORS_ORIGINS`: exact dashboard origins, comma-separated.
+- `APOLO_CONTROL_TOKEN`: long random admin-only token. The dashboard sends it as a Bearer token for VM creation and lifecycle actions. Do not reuse the host-agent token.
 
 The health endpoint reports the hypervisor ready only after a successful live agent probe. A configured URL/token alone is not considered readiness.
 
