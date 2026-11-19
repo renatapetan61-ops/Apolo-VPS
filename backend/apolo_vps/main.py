@@ -52,7 +52,7 @@ class CreateInstance(BaseModel):
 
 class EnvironmentRequest(BaseModel):
     vps_id: str = Field(min_length=4, max_length=80)
-    provider: str = Field(default="github-codespaces")
+    provider: str = Field(default="libvirt-agent")
     vcpus: int = Field(default=2, ge=1, le=32)
     memory_mib: int = Field(default=2048, ge=512, le=131072)
     disk_gib: int = Field(default=30, ge=10, le=2048)
