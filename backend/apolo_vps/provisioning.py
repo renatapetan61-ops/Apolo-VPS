@@ -82,8 +82,8 @@ def provision_linux(*, instance_id: str, computer_name: str | None, username: st
                 "addresses": [f"{ipv4}/{os.getenv('APOLO_GUEST_IPV4_PREFIX', '32')}",
                               f"{ipv6}/{os.getenv('APOLO_GUEST_IPV6_PREFIX', '128')}"],
                 "routes": [
-                    {"to": "0.0.0.0/0", "via": os.getenv("APOLO_IPV4_GATEWAY")},
-                    {"to": "::/0", "via": os.getenv("APOLO_IPV6_GATEWAY")},
+                    {"to": "0.0.0.0/0", "via": os.getenv("APOLO_IPV4_GATEWAY"), "on-link": True},
+                    {"to": "::/0", "via": os.getenv("APOLO_IPV6_GATEWAY"), "on-link": True},
                 ],
                 "nameservers": {"addresses": os.getenv("APOLO_DNS_SERVERS", "1.1.1.1,2606:4700:4700::1111").split(",")},
             }
