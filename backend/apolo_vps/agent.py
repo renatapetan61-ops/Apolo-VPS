@@ -18,12 +18,20 @@ def _authorize(token: str | None) -> None:
 
 
 @app.get("/agent/v1/health")
-def health():
+def health(x_apolo_agent_token: str | None = Header(default=None)):
+    _authorize(x_apolo_agent_token)
     try:
         info = provider.hypervisor_info()
         return {"state": "ok", "provider": "libvirt", "hypervisor": info}
     except ProviderUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/agent/v1/images")
+def images(x_apolo_agent_token: str | None = Header(default=None)):
+    _authorize(x_apolo_agent_token)
+    from .catalog import list_images
+    return {"images": list_images()}
 
 
 @app.get("/agent/v1/domains")
