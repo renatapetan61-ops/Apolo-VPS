@@ -289,7 +289,7 @@ def probe_node(nid:str,admin=Depends(admin_user)):
             allocate_waiting(db)
         raise HTTPException(503,"Não foi possível medir a capacidade real.") from exc
     keys=("available_vcpus","available_memory_mib","available_disk_gib")
-    if data.get("state")!="ok" or data.get("authorized") is not True or any(type(data.get(k)) is not int or data[k]<0 for k in keys): raise HTTPException(502,"Resposta de capacidade inválida.")
+    if data.get("state")!="ok" or data.get("authorized") is not True or data.get("storage",{}).get("durable") is not True or data.get("storage",{}).get("type") not in {"nfs","nfs4"} or any(type(data.get(k)) is not int or data[k]<0 for k in keys): raise HTTPException(502,"Agente não confirmou capacidade e armazenamento NFS durável.")
     with connect() as db:
         if not db.execute("SELECT 1 FROM capacity_nodes WHERE id=?",(nid,)).fetchone(): raise HTTPException(404,"Nó não encontrado.")
         db.execute("UPDATE capacity_nodes SET state='healthy',verified=1,free_vcpus=?,free_memory_mib=?,free_disk_gib=?,last_probe=? WHERE id=?",(*(data[k] for k in keys),stamp(),nid))
