@@ -198,6 +198,25 @@ def set_auto_renew(sid:str,payload:AutoRenew,user=Depends(current_user)):
         audit(db,user["id"],"subscription.auto_renew_changed",sid,{"enabled":payload.enabled})
     return {"subscription_id":sid,"auto_renew":payload.enabled}
 
+@router.post("/subscriptions/{sid}/cancel")
+def cancel_subscription(sid: str, user=Depends(current_user)):
+    init_db()
+    with connect() as db:
+        sub=db.execute("SELECT * FROM subscriptions WHERE id=? AND user_id=?",(sid,user["id"])).fetchone()
+        if not sub: raise HTTPException(404,"Assinatura não encontrada.")
+        if sub["state"]=="active": raise HTTPException(409,"Uma VPS ativa precisa ser desligada e removida pelo fluxo de encerramento antes de cancelar a assinatura.")
+        if sub["state"]=="canceled": return {"subscription_id":sid,"state":"canceled"}
+        if sub["node_id"]:
+            q=db.execute("SELECT * FROM provisioning_queue WHERE subscription_id=?",(sid,)).fetchone()
+            if q:
+                db.execute("UPDATE capacity_nodes SET reserved_vcpus=MAX(0,reserved_vcpus-?),reserved_memory_mib=MAX(0,reserved_memory_mib-?),reserved_disk_gib=MAX(0,reserved_disk_gib-?) WHERE id=?",
+                           (q["vcpus"],q["memory_mib"],q["disk_gib"],sub["node_id"]))
+        db.execute("UPDATE provisioning_queue SET state='canceled',updated_at=? WHERE subscription_id=?",(stamp(),sid))
+        db.execute("UPDATE subscriptions SET state='canceled',auto_renew=0,updated_at=? WHERE id=?",(stamp(),sid))
+        audit(db,user["id"],"subscription.canceled",sid)
+        allocate_waiting(db)
+    return {"subscription_id":sid,"state":"canceled"}
+
 @router.post("/admin/bootstrap")
 def bootstrap(authorization:str|None=Header(default=None),x_apolo_bootstrap_token:str|None=Header(default=None)):
     init_db(); expected=os.getenv("APOLO_BOOTSTRAP_ADMIN_TOKEN","")
