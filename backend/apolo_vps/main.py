@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from .ipam import IPAMError, IPAllocator
 from .store import InstanceStore
 from .environment_manager import EnvironmentStore
-from .accounts import router as accounts_router, init_db as init_accounts_db
+from .accounts import router as accounts_router
 from .admin_ops import router as admin_ops_router
 
 app = FastAPI(title="APOLO VPS API", version="0.5.0",
@@ -124,11 +124,6 @@ def _environments():
 
 def _ipam():
     return IPAllocator()
-
-
-@app.on_event("startup")
-def initialize_account_schema():
-    init_accounts_db()
 
 
 @app.get("/api/v1/health")
