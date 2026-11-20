@@ -221,8 +221,34 @@ The host agent implements these authenticated routes (header: `X-Apolo-Agent-Tok
 Required host-only settings:
 
 - `APOLO_PERSISTENT_STORAGE_MOUNT`: mountpoint of an NFS/NFS4 shared export. The agent refuses ordinary local directories and non-NFS filesystems.
-- `APOLO_ENVIRONMENT_BASE_IMAGE`: existing, verified x86_64 Linux cloud image used as the backing image for new environment disks.
+- `APOLO_ENVIRONMENT_BASE_IMAGE`: verified x86_64 Linux cloud image **stored inside the same NFS export**, for example `/srv/apolo-persistent/images/ubuntu-24.04-server-cloudimg-amd64.img`. The agent rejects a host-local backing image: a QCOW2 overlay references its backing file, so the base image must remain reachable at the identical path after host replacement.
 - `APOLO_LIBVIRT_BRIDGE`: preconfigured bridge on the hypervisor.
+
+The host agent checks the base image format with `qemu-img info`, supports QCOW2 and raw backing images, creates the overlay using the detected format, and verifies that the resulting QCOW2 metadata points to the exact shared backing-image path. Keep the image immutable and publish updates as versioned files; do not overwrite an image while running overlays depend on it.
+
+### Host agent systemd service
+
+The repository includes `deploy/apolo-vps-agent.service`. Review its service user, `libvirt`/`kvm` group membership, NFS mount path and binary paths before installation. The service binds to loopback on port 8090; expose it to the control plane only through a private VPN or TLS reverse proxy. Create `/etc/apolo-vps/agent.env` with at least:
+
+```bash
+APOLO_AGENT_TOKEN=<long-random-secret>
+APOLO_PERSISTENT_STORAGE_MOUNT=/srv/apolo-persistent
+APOLO_ENVIRONMENT_BASE_IMAGE=/srv/apolo-persistent/images/ubuntu-24.04-server-cloudimg-amd64.img
+APOLO_LIBVIRT_BRIDGE=br-vps
+APOLO_LIBVIRT_URI=qemu:///system
+```
+
+Protect that file with root ownership and mode 0600, grant the service account only the required libvirt and NFS permissions, then install and inspect the service:
+
+```bash
+sudo install -o root -g root -m 0600 /path/to/agent.env /etc/apolo-vps/agent.env
+sudo install -m 0644 deploy/apolo-vps-agent.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now apolo-vps-agent
+sudo systemctl status apolo-vps-agent
+```
+
+Do not copy a production token into the repository, issue tracker or chat. The control-plane worker must use the same token in `APOLO_PROVISIONER_TOKEN`, stored in its own secret manager.
 
 The NFS export must be provisioned, mounted at boot, monitored and backed up by the infrastructure operator. A successful mount check does not prove replication, backup, failover or a recovery-point objective. New environment VMs use the configured cloud image as a backing image; guest cloud-init credentials/network bootstrap for this separate environment workflow still needs integration before exposing these environments as user-ready VPSs.
 
