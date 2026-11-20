@@ -13,12 +13,16 @@ from pydantic import BaseModel, Field, field_validator
 from .ipam import IPAMError, IPAllocator
 from .store import InstanceStore
 from .environment_manager import EnvironmentStore
+from .accounts import router as accounts_router, init_db as init_accounts_db
 
-app = FastAPI(title="APOLO VPS API", version="0.4.0",
-              description="Greek-gold cloud infrastructure control plane")
+app = FastAPI(title="APOLO VPS API", version="0.5.0",
+              description="APOLO Free Cloud and Greek-gold cloud infrastructure control plane")
 origins = [x.strip() for x in os.getenv("APOLO_CORS_ORIGINS", "http://localhost:5173").split(",") if x.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
-                   allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type", "Authorization"])
+                   allow_methods=["GET", "POST", "PATCH", "DELETE"],
+                   allow_headers=["Content-Type", "Authorization", "X-Apolo-Bootstrap-Token"])
+app.include_router(accounts_router, prefix="/api/v1")
+
 
 class CreateInstance(BaseModel):
     computer_name: str | None = Field(default=None, min_length=3, max_length=63)
@@ -81,6 +85,7 @@ def _agent_config():
         raise HTTPException(503, "Host-agent URL must use HTTPS.")
     return url, token
 
+
 def _agent_request(method, path, body=None, timeout=12):
     url, token = _agent_config()
     try:
@@ -97,6 +102,7 @@ def _agent_request(method, path, body=None, timeout=12):
     except httpx.HTTPError as exc:
         raise HTTPException(503, "Host agent is unreachable.") from exc
 
+
 def _require_control_token(authorization: str | None):
     expected = os.getenv("APOLO_CONTROL_TOKEN", "")
     if not expected:
@@ -105,14 +111,23 @@ def _require_control_token(authorization: str | None):
     if not authorization or not authorization.startswith("Bearer ") or not hmac.compare_digest(supplied, expected):
         raise HTTPException(401, "A valid APOLO control token is required.")
 
+
 def _store():
     return InstanceStore()
+
 
 def _environments():
     return EnvironmentStore()
 
+
 def _ipam():
     return IPAllocator()
+
+
+@app.on_event("startup")
+def initialize_account_schema():
+    init_accounts_db()
+
 
 @app.get("/api/v1/health")
 def health():
@@ -127,16 +142,21 @@ def health():
         except HTTPException: pass
     return {"service":"apolo-vps-api","state":"ok","provider_configured":configured,
             "provider_ready":ready,"provisioning_mode":"remote-libvirt-agent" if ready else "not-ready",
+            "auth_configured":len(os.getenv("APOLO_AUTH_SECRET",""))>=32,
+            "smtp_configured":bool(os.getenv("APOLO_EMAIL_SMTP_HOST") and os.getenv("APOLO_EMAIL_FROM")),
             "hypervisor":hypervisor,"timestamp":datetime.now(timezone.utc).isoformat()}
+
 
 @app.get("/api/v1/hypervisors")
 def hypervisors():
     return {"hypervisors":[_agent_request("GET","/agent/v1/health").get("hypervisor",{})],
             "source":"live-agent"}
 
+
 @app.get("/api/v1/images")
 def images():
     return _agent_request("GET","/agent/v1/images")
+
 
 @app.get("/api/v1/instances")
 def instances():
@@ -152,64 +172,58 @@ def instances():
         result.append(item)
     return {"instances":result,"source":"sqlite-plus-live-libvirt"}
 
+
 @app.post("/api/v1/environments/requests", status_code=status.HTTP_202_ACCEPTED)
 def request_environment(payload: EnvironmentRequest, authorization: str | None = Header(default=None)):
     _require_control_token(authorization)
-    record = _environments().request(
-        vps_id=payload.vps_id, provider=payload.provider, vcpus=payload.vcpus,
-        memory_mib=payload.memory_mib, disk_gib=payload.disk_gib,
-    )
-    return {
-        "environment": record,
-        "accepted": True,
-        "provisioned": False,
-        "message": "Request persisted. A provider worker and available authorized capacity are required before a runtime can be started.",
-    }
+    record = _environments().request(vps_id=payload.vps_id, provider=payload.provider,
+        vcpus=payload.vcpus, memory_mib=payload.memory_mib, disk_gib=payload.disk_gib)
+    return {"environment":record,"accepted":True,"provisioned":False,
+        "message":"Request persisted. A provider worker and available authorized capacity are required before a runtime can be started."}
+
 
 @app.get("/api/v1/environments")
 def list_environments(vps_id: str | None = None, authorization: str | None = Header(default=None)):
     _require_control_token(authorization)
     records = _environments().list(vps_id)
     counts = {state: sum(1 for item in records if item["state"] == state) for state in EnvironmentStore.STATES}
-    return {"environments": records, "counts": counts, "source": "durable-sqlite-metadata"}
+    return {"environments":records,"counts":counts,"source":"durable-sqlite-metadata"}
+
 
 @app.post("/api/v1/environments/{environment_id}/transition")
 def transition_environment(environment_id: str, payload: EnvironmentTransition,
                            authorization: str | None = Header(default=None)):
     _require_control_token(authorization)
     try:
-        result = _environments().transition(
-            environment_id, payload.state, disk_uri=payload.disk_uri,
-            runtime_id=payload.runtime_id, last_error=payload.last_error,
-        )
+        result = _environments().transition(environment_id,payload.state,disk_uri=payload.disk_uri,
+            runtime_id=payload.runtime_id,last_error=payload.last_error)
     except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    if result is None:
-        raise HTTPException(404, "Environment request not found.")
-    return {"environment": result}
+        raise HTTPException(409,str(exc)) from exc
+    if result is None: raise HTTPException(404,"Environment request not found.")
+    return {"environment":result}
+
 
 @app.post("/api/v1/instances", status_code=status.HTTP_201_CREATED)
 def create_instance(payload: CreateInstance, authorization: str | None = Header(default=None)):
     _require_control_token(authorization)
-    if payload.location not in {"auto", "sa-east", "us-east", "eu-west"}:
-        raise HTTPException(400, "Unsupported location.")
-    host = _agent_request("GET", "/agent/v1/health", timeout=5)
-    configured_location = host.get("location", "unassigned")
+    if payload.location not in {"auto","sa-east","us-east","eu-west"}:
+        raise HTTPException(400,"Unsupported location.")
+    host = _agent_request("GET","/agent/v1/health",timeout=5)
+    configured_location = host.get("location","unassigned")
     if payload.location != "auto" and payload.location != configured_location:
-        raise HTTPException(409, "The connected hypervisor is not registered in the selected location.")
+        raise HTTPException(409,"The connected hypervisor is not registered in the selected location.")
     instance_id = "vm-" + uuid.uuid4().hex
     requested_name = payload.computer_name or ("apolo-" + uuid.uuid4().hex[:8])
     try:
         ipv4, ipv6 = _ipam().allocate(instance_id)
     except IPAMError as exc:
-        raise HTTPException(503, str(exc)) from exc
+        raise HTTPException(503,str(exc)) from exc
     result = None
     try:
-        result = _agent_request("POST", "/agent/v1/provision", {
-            "instance_id":instance_id, "computer_name":requested_name,
-            "username":payload.username, "image_id":payload.os, "ipv4":ipv4, "ipv6":ipv6,
-            "memory_mib":payload.memory_mib, "vcpus":payload.vcpus, "disk_gib":payload.disk_gib,
-        }, timeout=240)
+        result = _agent_request("POST","/agent/v1/provision",{
+            "instance_id":instance_id,"computer_name":requested_name,"username":payload.username,
+            "image_id":payload.os,"ipv4":ipv4,"ipv6":ipv6,"memory_mib":payload.memory_mib,
+            "vcpus":payload.vcpus,"disk_gib":payload.disk_gib},timeout=240)
         record={"id":instance_id,"name":result["computer_name"],"username":payload.username,
                 "os":payload.os,"ipv4":ipv4,"ipv6":ipv6,"location":configured_location,"state":"running"}
         _store().save(record)
@@ -217,13 +231,12 @@ def create_instance(payload: CreateInstance, authorization: str | None = Header(
                 "message":"VM created and started by libvirt. Save the password now; it will not be shown again."}
     except Exception:
         if result and result.get("computer_name"):
-            try:
-                _agent_request("POST", f"/agent/v1/domains/{result['computer_name']}/delete", timeout=30)
-            except Exception:
-                pass
+            try: _agent_request("POST",f"/agent/v1/domains/{result['computer_name']}/delete",timeout=30)
+            except Exception: pass
         try: _ipam().release(instance_id)
         except Exception: pass
         raise
+
 
 @app.post("/api/v1/instances/{name}/{action}")
 def instance_lifecycle(name: str, action: str, authorization: str | None = Header(default=None)):
@@ -239,6 +252,7 @@ def instance_lifecycle(name: str, action: str, authorization: str | None = Heade
             except Exception: pass
     return result
 
+
 @app.get("/")
 def root():
-    return {"name":"APOLO VPS","api":"/api/v1/health","docs":"/docs"}
+    return {"name":"APOLO VPS","api":"/api/v1/health","docs":"/docs","free_cloud":"/api/v1/plans"}
