@@ -233,7 +233,11 @@ def register_node(payload:NodeCreate,admin=Depends(admin_user)):
     return {"node_id":nid,"state":"pending_verification","capacity_eligible":False}
 @router.post("/admin/nodes/{nid}/probe")
 def probe_node(nid:str,admin=Depends(admin_user)):
-    init_db(); url=os.getenv("APOLO_PROVISIONER_URL","").rstrip("/"); token=os.getenv("APOLO_PROVISIONER_TOKEN","")
+    init_db()
+    with connect() as db:
+        other=db.execute("SELECT id FROM capacity_nodes WHERE state='healthy' AND verified=1 AND id<>? LIMIT 1",(nid,)).fetchone()
+    if other: raise HTTPException(409,"O adaptador atual representa um único host agent; não duplique sua capacidade.")
+    url=os.getenv("APOLO_PROVISIONER_URL","").rstrip("/"); token=os.getenv("APOLO_PROVISIONER_TOKEN","")
     if not url.startswith("https://") or not token: raise HTTPException(503,"Configure host agent por HTTPS privado.")
     try:
         response=httpx.get(url+"/agent/v1/capacity",headers={"X-Apolo-Agent-Token":token},timeout=httpx.Timeout(10,connect=3)); response.raise_for_status(); data=response.json()
@@ -268,7 +272,8 @@ def admin_audit(admin=Depends(admin_user)):
 def process_due_renewals(at=None):
     init_db(); at=at or now(); renewed=deferred=disabled=0
     with connect() as db:
-        due=db.execute("SELECT * FROM subscriptions WHERE state IN ('active','capacity_reserved') AND auto_renew=1 AND renews_at IS NOT NULL AND renews_at<=?",(stamp(at),)).fetchall()
+        db.execute("BEGIN IMMEDIATE")
+        due=db.execute("SELECT * FROM subscriptions WHERE state='active' AND auto_renew=1 AND renews_at IS NOT NULL AND renews_at<=?",(stamp(at),)).fetchall()
         for sub in due:
             scheduled=sub["renews_at"]; node=db.execute("SELECT * FROM capacity_nodes WHERE id=?",(sub["node_id"],)).fetchone() if sub["node_id"] else None
             if node and node["state"]=="healthy" and node["verified"]:
@@ -278,5 +283,5 @@ def process_due_renewals(at=None):
             else:
                 db.execute("UPDATE subscriptions SET state='grace',updated_at=? WHERE id=?",(stamp(at),sub["id"]))
                 db.execute("INSERT OR IGNORE INTO renewal_events VALUES(?,?,?,'capacity_unavailable',?)",("ren-"+uuid.uuid4().hex,sub["id"],scheduled,stamp(at))); deferred+=1
-        disabled=db.execute("SELECT COUNT(*) FROM subscriptions WHERE state IN ('active','capacity_reserved') AND auto_renew=0 AND renews_at IS NOT NULL AND renews_at<=?",(stamp(at),)).fetchone()[0]
+        disabled=db.execute("SELECT COUNT(*) FROM subscriptions WHERE state='active' AND auto_renew=0 AND renews_at IS NOT NULL AND renews_at<=?",(stamp(at),)).fetchone()[0]
     return {"renewed":renewed,"deferred_for_capacity":deferred,"auto_renew_disabled":disabled}
