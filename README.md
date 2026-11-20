@@ -260,3 +260,63 @@ The worker orchestration and its test doubles are implemented. The host agent no
 exist and a real runtime is independently verified, jobs remain queued or fail
 closed; no VPS should be advertised as provisioned. GitHub Actions CI validates
 code, not host capacity, public networking, durable storage, or VM boot.
+
+
+## APOLO Free Cloud accounts, plans and renewals (software stage)
+
+The API now exposes account registration, email verification, bearer sessions, a free Linux plan, subscription requests, a capacity wait queue, host capacity inventory, admin views, audit events, and a scheduled renewal worker.
+
+### Required API secrets and mail delivery
+
+Set these in the API secret manager (never commit them):
+
+- `APOLO_AUTH_SECRET`: at least 32 random characters; signs 12-hour account sessions.
+- `APOLO_BOOTSTRAP_ADMIN_TOKEN`: at least 32 random characters; used once to promote the first verified account to admin. Remove it immediately after bootstrap.
+- `APOLO_EMAIL_SMTP_HOST`, `APOLO_EMAIL_SMTP_PORT`, `APOLO_EMAIL_SMTP_USER`, `APOLO_EMAIL_SMTP_PASSWORD`, `APOLO_EMAIL_FROM`: SMTP delivery for email verification. Port 465 uses SMTP over SSL; other ports use STARTTLS.
+- `APOLO_STATE_DB`: durable SQLite database path shared by API and renewal job.
+
+A registration remains `pending_verification` until the email token is confirmed. Do not expose verification tokens in API responses or logs. Without SMTP configuration the API intentionally refuses to complete the registration flow.
+
+### Account and plan endpoints
+
+- `POST /api/v1/auth/register` — create a pending account.
+- `POST /api/v1/auth/verify-email` — verify the token delivered by email.
+- `POST /api/v1/auth/login` — obtain a 12-hour bearer session.
+- `GET /api/v1/auth/me` — current account.
+- `GET /api/v1/plans` — enabled free plans and available term choices.
+- `POST /api/v1/subscriptions` — request the free plan for 1, 2, 5 or 10 years; it may enter the capacity queue.
+- `GET /api/v1/subscriptions` — current account subscriptions.
+- `PATCH /api/v1/subscriptions/{id}/auto-renew` — enable or disable free renewal.
+
+### Admin endpoints
+
+- `POST /api/v1/admin/bootstrap` — one-time first-admin promotion; requires a verified bearer session and `X-Apolo-Bootstrap-Token`.
+- `GET /api/v1/admin/overview`, `/users`, `/subscriptions`, `/audit` — administration views.
+- `POST /api/v1/admin/nodes` — register a host node (not capacity eligible yet).
+- `POST /api/v1/admin/nodes/{id}/probe` — measure capacity from the configured private HTTPS host agent.
+- `POST /api/v1/admin/queue/reconcile` — reserve measured free capacity for waiting requests.
+- `POST /api/v1/admin/subscriptions/{id}/activate` — start the subscription term only after the referenced VPS is present in the instance inventory.
+
+The current host-agent configuration represents one host. The API prevents registering that same configured agent as multiple capacity nodes, which would otherwise double-count resources. Multi-node enrollment requires a dedicated per-node credential/secret-manager design before it is enabled.
+
+### Queue and provisioning truth
+
+Queue states are `waiting_capacity`, `capacity_reserved`, and `provisioned`. A reservation is not a running VPS. The admin activation endpoint verifies that the supplied instance ID exists in the APOLO instance inventory and that the reserved host is still healthy. Public tenant-to-VM provisioning and secure credential delivery still require a further integration milestone; the existing legacy VM create endpoint remains protected by its separate control token.
+
+### Automatic free renewals
+
+Install the systemd timer on the durable API host after reviewing user, paths and database permissions:
+
+```bash
+sudo install -m 0644 deploy/apolo-vps-renewal.service /etc/systemd/system/
+sudo install -m 0644 deploy/apolo-vps-renewal.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now apolo-vps-renewal.timer
+systemctl list-timers apolo-vps-renewal.timer
+```
+
+The worker renews only subscriptions in `active` state with a healthy verified capacity node. If capacity is unavailable, the subscription enters `grace`; no paid conversion occurs. The scheduler must run against the same durable `APOLO_STATE_DB` as the API. Renewal is not a guarantee of unfunded compute for ten years: the service must reserve or commit resources for every advertised term.
+
+### Current implementation boundary
+
+The backend foundation is implemented, but it is not yet a public production cloud: configure SMTP and secrets, complete security review/rate limiting and tenant ownership for the legacy VM lifecycle routes, connect a real verified host, finish guest provisioning from subscriptions, and run real end-to-end VM recovery tests before accepting public customers.
