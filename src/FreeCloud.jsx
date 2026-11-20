@@ -16,6 +16,8 @@ export default function FreeCloud({ adminOnly = false }) {
   const [term, setTerm] = useState(1);
   const [subscriptions, setSubscriptions] = useState([]);
   const [overview, setOverview] = useState(null);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminSubscriptions, setAdminSubscriptions] = useState([]);
   const [nodeName, setNodeName] = useState('APOLO host');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -50,6 +52,12 @@ export default function FreeCloud({ adminOnly = false }) {
       headers:{ Authorization:'Bearer ' + currentToken }
     });
     if (response.ok) setOverview(await response.json());
+    const [usersResponse, subsResponse] = await Promise.all([
+      fetch(API + endpoint + '/admin/users', { headers:{ Authorization:'Bearer ' + currentToken } }),
+      fetch(API + endpoint + '/admin/subscriptions', { headers:{ Authorization:'Bearer ' + currentToken } })
+    ]);
+    if (usersResponse.ok) setAdminUsers((await usersResponse.json()).users || []);
+    if (subsResponse.ok) setAdminSubscriptions((await subsResponse.json()).subscriptions || []);
   }
 
   useEffect(() => {
@@ -164,6 +172,8 @@ export default function FreeCloud({ adminOnly = false }) {
         {(overview?.nodes||[]).map(n=><div className="fc-node" key={n.id}><div><b>{n.name}</b><small>{n.id} · {n.state} · verificado: {n.verified?'sim':'não'}</small><small>Disponível: {n.free_vcpus-n.reserved_vcpus} vCPU · {n.free_memory_mib-n.reserved_memory_mib} MiB · {n.free_disk_gib-n.reserved_disk_gib} GiB</small></div><button className="fc-secondary" onClick={()=>probeNode(n.id)} disabled={loading}>Medir capacidade</button></div>)}
       </div>
       <div className="fc-card"><div className="fc-card-title"><Clock3 size={18}/><span>FILA DE CAPACIDADE</span></div>{(overview?.waiting_queue||[]).length===0?<p className="fc-muted">Nenhuma solicitação aguardando capacidade.</p>:(overview.waiting_queue||[]).map(q=><div className="fc-node" key={q.id}><div><b>{q.email}</b><small>{q.term_years} anos · {q.vcpus} vCPU · {q.memory_mib} MiB · {q.disk_gib} GiB</small><small>{q.id}</small></div><span className="fc-state">{q.state}</span></div>)}</div>
+      <div className="fc-card"><div className="fc-card-title"><Users size={18}/><span>CONTAS DE USUÁRIOS</span></div>{adminUsers.length===0?<p className="fc-muted">Nenhuma conta cadastrada.</p>:adminUsers.map(u=><div className="fc-node" key={u.id}><div><b>{u.email}</b><small>{u.display_name} · {u.role} · {u.state}</small><small>Criada em {new Date(u.created_at).toLocaleString()}</small></div></div>)}</div>
+      <div className="fc-card"><div className="fc-card-title"><Activity size={18}/><span>ASSINATURAS E RENOVAÇÕES</span></div>{adminSubscriptions.length===0?<p className="fc-muted">Nenhuma assinatura cadastrada.</p>:adminSubscriptions.map(s=><div className="fc-node" key={s.id}><div><b>{s.email}</b><small>{s.plan_name} · {s.term_years} anos · {s.state}</small><small>Renovação automática: {s.auto_renew?'sim':'não'} · Próxima: {s.renews_at ? new Date(s.renews_at).toLocaleDateString() : 'a definir após ativação'}</small></div></div>)}</div>
       <button className="fc-secondary" onClick={()=>loadAdmin()} disabled={loading}>Atualizar painel</button>
     </div>}
   </section>;
