@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, ArrowDownToLine, ChevronDown, CircleHelp, Cloud, Cpu, Database, Globe2, HardDrive, KeyRound, Layers3, LifeBuoy, Menu, Network, Plus, Power, RefreshCw, Search, Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import './styles.css';
+import FreeCloud from './FreeCloud';
 
 const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const nav = [{ label: 'Overview', icon: Layers3 }, { label: 'Virtual machines', icon: Server }, { label: 'Environments', icon: Activity }, { label: 'Images', icon: HardDrive }, { label: 'Networks', icon: Network }];
+const nav = [{ label: 'Overview', icon: Layers3 }, { label: 'Virtual machines', icon: Server }, { label: 'Environments', icon: Activity }, { label: 'Free Cloud', icon: Cloud }, { label: 'Admin', icon: ShieldCheck }, { label: 'Images', icon: HardDrive }, { label: 'Networks', icon: Network }];
 function App() {
   const [section, setSection] = useState('Overview');
   const [instances, setInstances] = useState([]);
@@ -72,7 +73,7 @@ function App() {
     {mobileNav && <div className="scrim" onClick={() => setMobileNav(false)}/>}
     <main className="main">
       <header className="topbar"><button className="icon-btn menu-btn" onClick={() => setMobileNav(true)}><Menu/></button><div className="crumb">Workspace <span>/</span> <b>{section}</b></div><div className="top-actions"><div className={'connection ' + (health.state === 'ok' ? 'connected' : '')}><i/>{health.state === 'ok' ? 'API connected' : health.state === 'offline' ? 'API offline' : 'Checking API'}</div><button className="icon-btn" title="Help"><CircleHelp size={18}/></button><div className="avatar small-avatar">A</div></div></header>
-      <div className="content">
+      <div className={section === 'Free Cloud' || section === 'Admin' ? 'content fc-only' : 'content'}>{(section === 'Free Cloud' || section === 'Admin') && <FreeCloud adminOnly={section === 'Admin'} />}
         <div className="welcome-row"><div><div className="eyebrow"><Sparkles size={13}/> THE CLOUD, REFINED</div><h1>{section === 'Overview' ? 'Your infrastructure,' : section}<em> elevated.</em></h1><p className="subtitle">A clear view of your compute, network and virtual machines.</p></div><button className="gold-button" onClick={() => setShowCreate(true)}><Plus size={17}/> Create VPS</button></div>
         {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice('')}><X size={16}/></button></div>}
         {section === 'Environments' && <section className="instances-panel">

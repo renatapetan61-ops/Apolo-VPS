@@ -1,0 +1,17 @@
+[Unit]
+Description=APOLO Free Cloud subscription renewal run
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=apolo
+Group=apolo
+WorkingDirectory=/opt/apolo-vps/backend
+EnvironmentFile=/etc/apolo-vps/api.env
+ExecStart=/opt/apolo-vps/venv/bin/python -m apolo_vps.renewal_worker
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/apolo-vps
