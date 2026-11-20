@@ -14,6 +14,7 @@ from .ipam import IPAMError, IPAllocator
 from .store import InstanceStore
 from .environment_manager import EnvironmentStore
 from .accounts import router as accounts_router, init_db as init_accounts_db
+from .admin_ops import router as admin_ops_router
 
 app = FastAPI(title="APOLO VPS API", version="0.5.0",
               description="APOLO Free Cloud and Greek-gold cloud infrastructure control plane")
@@ -22,6 +23,7 @@ app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=Fals
                    allow_methods=["GET", "POST", "PATCH", "DELETE"],
                    allow_headers=["Content-Type", "Authorization", "X-Apolo-Bootstrap-Token"])
 app.include_router(accounts_router, prefix="/api/v1")
+app.include_router(admin_ops_router, prefix="/api/v1")
 
 
 class CreateInstance(BaseModel):
