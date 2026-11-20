@@ -77,3 +77,24 @@ def test_renewal_is_deferred_when_reserved_host_is_unhealthy(monkeypatch, tmp_pa
     assert result["deferred_for_capacity"] == 1
     with accounts.connect() as db:
         assert db.execute("SELECT state FROM subscriptions WHERE id='s1'").fetchone()["state"] == "grace"
+
+
+def test_user_can_cancel_waiting_request(monkeypatch, tmp_path):
+    setup_env(monkeypatch, tmp_path)
+    with TestClient(app) as client:
+        # Create an active account directly to isolate the cancellation behavior.
+        with accounts.connect() as db:
+            db.execute("""INSERT INTO users(id,email,display_name,password_hash,role,state,created_at)
+              VALUES('cancel-user','cancel@example.com','Cancel User','hash','user','active',?)""",
+              (accounts.stamp(),))
+        token = accounts.issue_token({"id":"cancel-user"})
+        headers = {"Authorization":"Bearer " + token}
+        response = client.post("/api/v1/subscriptions", headers=headers,
+                               json={"term_years":1,"auto_renew":True})
+        assert response.status_code == 202
+        sid = response.json()["subscription"]["id"]
+        canceled = client.post("/api/v1/subscriptions/" + sid + "/cancel", headers=headers)
+        assert canceled.status_code == 200
+        assert canceled.json()["state"] == "canceled"
+        listed = client.get("/api/v1/subscriptions", headers=headers).json()["subscriptions"]
+        assert listed[0]["state"] == "canceled"
