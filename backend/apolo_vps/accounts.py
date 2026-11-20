@@ -94,6 +94,8 @@ class Register(BaseModel):
 class Login(BaseModel):
     email:str
     password:str=Field(min_length=1,max_length=128)
+class ResendVerification(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
 class Verify(BaseModel): token:str=Field(min_length=32,max_length=512)
 class Subscribe(BaseModel):
     plan_id:str="free-linux"
@@ -139,6 +141,23 @@ def register(payload:Register):
         audit(db,uid,"account.registered",uid)
     send_verification(payload.email,payload.display_name.strip(),token)
     return {"accepted":True,"state":"pending_verification","message":"Verifique seu e-mail para ativar a conta."}
+
+@router.post("/auth/resend-verification",status_code=202)
+def resend_verification(payload:ResendVerification):
+    init_db()
+    email=payload.email.strip().lower()
+    with connect() as db:
+        row=db.execute("SELECT * FROM users WHERE email=? AND state='pending_verification'",(email,)).fetchone()
+        if not row: return {"accepted":True,"message":"Se a conta estiver pendente, enviaremos um novo token."}
+        issued=datetime.fromisoformat(row["verify_expires"])-timedelta(minutes=30) if row["verify_expires"] else now()-timedelta(minutes=1)
+        if (now()-issued).total_seconds()<60:
+            raise HTTPException(429,"Aguarde um minuto antes de solicitar outro token.")
+        token=secrets.token_urlsafe(36)
+        db.execute("UPDATE users SET verify_hash=?,verify_expires=? WHERE id=?",
+                   (hashlib.sha256(token.encode()).hexdigest(),stamp(now()+timedelta(minutes=30)),row["id"]))
+    send_verification(email,row["display_name"],token)
+    return {"accepted":True,"message":"Se a conta estiver pendente, enviaremos um novo token."}
+
 
 @router.post("/auth/verify-email")
 def verify_email(payload:Verify):
@@ -261,7 +280,13 @@ def probe_node(nid:str,admin=Depends(admin_user)):
     try:
         response=httpx.get(url+"/agent/v1/capacity",headers={"X-Apolo-Agent-Token":token},timeout=httpx.Timeout(10,connect=3)); response.raise_for_status(); data=response.json()
     except (httpx.HTTPError,ValueError) as exc:
-        with connect() as db: db.execute("UPDATE capacity_nodes SET state='offline',verified=0 WHERE id=?",(nid,))
+        with connect() as db:
+            pending=db.execute("SELECT COALESCE(SUM(vcpus),0) v,COALESCE(SUM(memory_mib),0) m,COALESCE(SUM(disk_gib),0) d FROM provisioning_queue WHERE node_id=? AND state='capacity_reserved'",(nid,)).fetchone()
+            db.execute("UPDATE capacity_nodes SET state='offline',verified=0,reserved_vcpus=MAX(0,reserved_vcpus-?),reserved_memory_mib=MAX(0,reserved_memory_mib-?),reserved_disk_gib=MAX(0,reserved_disk_gib-?) WHERE id=?",
+                       (pending["v"],pending["m"],pending["d"],nid))
+            db.execute("UPDATE provisioning_queue SET state='waiting_capacity',node_id=NULL,updated_at=?,last_error='Host agent indisponível; reserva liberada.' WHERE node_id=? AND state='capacity_reserved'",(stamp(),nid))
+            db.execute("UPDATE subscriptions SET state='waiting_capacity',node_id=NULL,updated_at=? WHERE node_id=? AND state='capacity_reserved'",(stamp(),nid))
+            allocate_waiting(db)
         raise HTTPException(503,"Não foi possível medir a capacidade real.") from exc
     keys=("available_vcpus","available_memory_mib","available_disk_gib")
     if data.get("state")!="ok" or data.get("authorized") is not True or any(type(data.get(k)) is not int or data[k]<0 for k in keys): raise HTTPException(502,"Resposta de capacidade inválida.")
