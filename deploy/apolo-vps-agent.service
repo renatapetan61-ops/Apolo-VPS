@@ -1,0 +1,25 @@
+[Unit]
+Description=APOLO VPS authenticated QEMU/libvirt host agent
+After=network-online.target libvirtd.service remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=/srv/apolo-persistent
+
+[Service]
+Type=simple
+User=apolo
+Group=libvirt
+SupplementaryGroups=kvm
+WorkingDirectory=/opt/apolo-vps/backend
+EnvironmentFile=/etc/apolo-vps/agent.env
+ExecStart=/opt/apolo-vps/venv/bin/uvicorn apolo_vps.agent:app --host 127.0.0.1 --port 8090
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/apolo-persistent
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
