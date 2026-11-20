@@ -21,6 +21,9 @@ def activate_subscription(subscription_id: str, payload: ActivateSubscription,
         node = db.execute("SELECT * FROM capacity_nodes WHERE id=?", (sub["node_id"],)).fetchone()
         if not node or node["state"] != "healthy" or not node["verified"]:
             raise HTTPException(409, "O host reservado não está saudável e verificado.")
+        has_inventory = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='instances'").fetchone()
+        if not has_inventory:
+            raise HTTPException(409, "O inventário de VPS ainda não foi inicializado.")
         instance = db.execute("SELECT id FROM instances WHERE id=?", (payload.instance_id,)).fetchone()
         if not instance:
             raise HTTPException(409, "A instância não existe no inventário do APOLO VPS; não é possível ativar a assinatura.")
