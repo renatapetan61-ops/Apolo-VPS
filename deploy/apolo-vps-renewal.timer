@@ -1,0 +1,11 @@
+[Unit]
+Description=Run APOLO Free Cloud renewals every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=apolo-vps-renewal.service
+
+[Install]
+WantedBy=timers.target
