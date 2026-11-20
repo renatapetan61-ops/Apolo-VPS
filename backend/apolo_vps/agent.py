@@ -125,30 +125,49 @@ def ensure_disk(payload: DiskRequest, x_apolo_agent_token: str | None = Header(d
     if payload.storage_class != "persistent":
         raise HTTPException(400, "Only persistent storage class is supported.")
     root = _persistent_root()
-    base_image = os.getenv("APOLO_ENVIRONMENT_BASE_IMAGE", "")
-    if not base_image or not Path(base_image).is_file():
-        raise HTTPException(503, "APOLO_ENVIRONMENT_BASE_IMAGE must point to a verified Linux cloud image.")
+    base_raw = os.getenv("APOLO_ENVIRONMENT_BASE_IMAGE", "")
+    if not base_raw:
+        raise HTTPException(503, "APOLO_ENVIRONMENT_BASE_IMAGE is not configured.")
+    base_image = Path(base_raw).resolve()
+    # QCOW2 overlays retain a reference to their backing image. Requiring the
+    # base image on the same shared NFS export prevents a recovered VM on a
+    # replacement host from depending on a file that existed only on the old host.
+    if root not in base_image.parents or not base_image.is_file():
+        raise HTTPException(503, "The verified base image must be a file inside the shared NFS mount.")
     disk = (root / f"{payload.environment_id}.qcow2").resolve()
     if disk.parent != root:
         raise HTTPException(400, "Invalid disk path.")
     qemu_img = os.getenv("APOLO_QEMU_IMG", "qemu-img")
-    if not disk.exists():
-        try:
+    import json
+    try:
+        base_info = subprocess.run(
+            [qemu_img, "info", "--output=json", str(base_image)],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+        base_format = json.loads(base_info.stdout).get("format")
+        if base_format not in {"qcow2", "raw"}:
+            raise HTTPException(503, "Base image format must be qcow2 or raw.")
+        if not disk.exists():
             subprocess.run(
-                [qemu_img, "create", "-f", "qcow2", "-F", "qcow2", "-b", base_image, str(disk), f"{payload.size_gib}G"],
+                [qemu_img, "create", "-f", "qcow2", "-F", base_format, "-b", str(base_image), str(disk), f"{payload.size_gib}G"],
                 check=True, capture_output=True, text=True, timeout=180,
             )
-        except (OSError, subprocess.SubprocessError) as exc:
-            disk.unlink(missing_ok=True)
-            raise HTTPException(503, "Could not create persistent QCOW2 disk.") from exc
-    try:
-        info = subprocess.run([qemu_img, "info", "--output=json", str(disk)], check=True, capture_output=True, text=True, timeout=30)
-        import json
+        info = subprocess.run(
+            [qemu_img, "info", "--output=json", str(disk)],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
         details = json.loads(info.stdout)
-        if details.get("format") != "qcow2" or int(details.get("virtual-size", 0)) < payload.size_gib * (1024 ** 3):
-            raise HTTPException(409, "Existing persistent disk does not match the requested format or size.")
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        raise HTTPException(503, "Unable to verify persistent QCOW2 disk.") from exc
+        backing = details.get("backing-filename")
+        backing_path = Path(backing).resolve() if backing else None
+        if (details.get("format") != "qcow2"
+                or int(details.get("virtual-size", 0)) < payload.size_gib * (1024 ** 3)
+                or backing_path != base_image):
+            raise HTTPException(409, "Persistent disk format, size or shared backing image does not match the request.")
+    except HTTPException:
+        raise
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
+        disk.unlink(missing_ok=True)
+        raise HTTPException(503, "Unable to create or verify the persistent QCOW2 disk and its shared backing image.") from exc
     return {"durable": True, "disk_uri": disk.as_uri(), "storage_class": "persistent", "storage_type": "nfs"}
 
 
