@@ -209,12 +209,28 @@ daemon; those are temporary execution environments.
   an object/block storage system with snapshots and access controls) and must
   guarantee that `disk_uri` survives host replacement.
 
+### Host agent endpoints and shared persistent storage
+
+The host agent implements these authenticated routes (header: `X-Apolo-Agent-Token`):
+
+- `GET /agent/v1/capacity`: reads live libvirt CPU/memory data and free space on the persistent volume.
+- `POST /agent/v1/disks/ensure`: creates or validates a QCOW2 overlay on the shared volume.
+- `POST /agent/v1/environments/restore`: defines or restarts a libvirt domain with that disk attached.
+- `GET /agent/v1/runtimes/{runtime_id}`: reads domain state and attached disk from libvirt XML.
+
+Required host-only settings:
+
+- `APOLO_PERSISTENT_STORAGE_MOUNT`: mountpoint of an NFS/NFS4 shared export. The agent refuses ordinary local directories and non-NFS filesystems.
+- `APOLO_ENVIRONMENT_BASE_IMAGE`: existing, verified x86_64 Linux cloud image used as the backing image for new environment disks.
+- `APOLO_LIBVIRT_BRIDGE`: preconfigured bridge on the hypervisor.
+
+The NFS export must be provisioned, mounted at boot, monitored and backed up by the infrastructure operator. A successful mount check does not prove replication, backup, failover or a recovery-point objective. New environment VMs use the configured cloud image as a backing image; guest cloud-init credentials/network bootstrap for this separate environment workflow still needs integration before exposing these environments as user-ready VPSs.
+
+To test on the actual host, configure these values, run the agent behind private HTTPS/VPN, configure the worker with the matching token, submit a small environment request, verify the domain and NFS-backed disk, stop the domain, then submit a recovery request and confirm the same disk URI is attached after restart. Do not run this acceptance test against a production disk without a snapshot/backup.
+
 ### What is and is not live yet
 
-The worker orchestration and its test doubles are implemented. The real
-host-agent endpoints listed above, external storage backend, live billing
-meter, automatic monitoring/recovery scheduler, and a production host have
-not been connected or validated in this repository. Until those integrations
+The worker orchestration and its test doubles are implemented. The host agent now implements the four worker endpoints. Its persistent-disk adapter accepts only an operator-mounted NFS/NFS4 volume and verifies the mount with findmnt; it creates QCOW2 overlays from APOLO_ENVIRONMENT_BASE_IMAGE, defines/starts a libvirt domain, and independently inspects the domain and attached disk. This is implementation code, not proof that a production NFS service or hypervisor has been configured. The real host, NFS server/export, network bridge, base image, private TLS/VPN route, and integration test have not been connected or validated. Live billing and automatic monitoring/recovery scheduling also remain unimplemented. Until those integrations
 exist and a real runtime is independently verified, jobs remain queued or fail
 closed; no VPS should be advertised as provisioned. GitHub Actions CI validates
 code, not host capacity, public networking, durable storage, or VM boot.
